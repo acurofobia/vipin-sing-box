@@ -1,6 +1,7 @@
 package libbox
 
 import (
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -106,6 +107,17 @@ func ReloadSetupOptions(options *SetupOptions) {
 
 func Setup(options *SetupOptions) error {
 	applySetupOptions(options)
+	if runtime.GOOS == "android" {
+		// Migration from the upstream diagnostic snapshot, which contains live
+		// WG/VLESS secrets. Android stores its import snapshot in Keystore only.
+		_ = os.Remove(configSnapshotPath())
+		_ = filepath.WalkDir(sWorkingPath, func(path string, entry fs.DirEntry, err error) error {
+			if err == nil && !entry.IsDir() && entry.Name() == "configuration.json" {
+				_ = os.Remove(path)
+			}
+			return nil
+		})
+	}
 	os.MkdirAll(sWorkingPath, 0o777)
 	os.MkdirAll(sTempPath, 0o777)
 	return redirectStderr(filepath.Join(sWorkingPath, "CrashReport-"+sCrashReportSource+".log"))

@@ -31,6 +31,7 @@ import (
 type CommandServer struct {
 	*daemon.StartedService
 	ctx               context.Context
+	cancel            context.CancelFunc
 	managedService    *daemon.ManagedService
 	handler           CommandServerHandler
 	platformInterface PlatformInterface
@@ -53,7 +54,7 @@ type CommandServerHandler interface {
 }
 
 func NewCommandServer(handler CommandServerHandler, platformInterface PlatformInterface) (*CommandServer, error) {
-	ctx := baseContext(platformInterface)
+	ctx, cancel := context.WithCancel(baseContext(platformInterface))
 	powerManager := powerreport.NewManager()
 	service.MustRegister[*powerreport.Manager](ctx, powerManager)
 	platformWrapper := &platformInterfaceWrapper{
@@ -64,6 +65,7 @@ func NewCommandServer(handler CommandServerHandler, platformInterface PlatformIn
 	service.MustRegister[adapter.PlatformInterface](ctx, platformWrapper)
 	server := &CommandServer{
 		ctx:               ctx,
+		cancel:            cancel,
 		handler:           handler,
 		platformInterface: platformInterface,
 		platformWrapper:   platformWrapper,
@@ -193,6 +195,7 @@ func (s *CommandServer) Start() error {
 }
 
 func (s *CommandServer) Close() {
+	s.CancelServiceStart()
 	if s.endPauseTimer != nil {
 		s.endPauseTimer.Stop()
 	}
@@ -206,20 +209,25 @@ func (s *CommandServer) Close() {
 }
 
 type OverrideOptions struct {
-	AutoRedirect   bool
-	IncludePackage StringIterator
-	ExcludePackage StringIterator
+	PriorityFailoverJSON string
+	AutoRedirect         bool
+	IncludePackage       StringIterator
+	ExcludePackage       StringIterator
 }
 
 func (s *CommandServer) StartOrReloadService(configContent string, options *OverrideOptions) error {
+	if err := s.ctx.Err(); err != nil {
+		return err
+	}
 	saveConfigSnapshot(configContent)
 	if s.powerManager.Recorder() != nil {
 		copyConfigSnapshot(filepath.Join(sWorkingPath, powerreport.DraftDirectoryName))
 	}
 	err := s.StartedService.StartOrReloadService(s.ctx, configContent, &daemon.OverrideOptions{
-		AutoRedirect:   options.AutoRedirect,
-		IncludePackage: iteratorToArray(options.IncludePackage),
-		ExcludePackage: iteratorToArray(options.ExcludePackage),
+		PriorityFailoverJSON: options.PriorityFailoverJSON,
+		AutoRedirect:         options.AutoRedirect,
+		IncludePackage:       iteratorToArray(options.IncludePackage),
+		ExcludePackage:       iteratorToArray(options.ExcludePackage),
 	})
 	if err != nil {
 		return E.Cause(err, "start or reload service")
@@ -347,4 +355,12 @@ func (h *platformHandler) WriteDebugMessage(message string) {
 
 func (h *platformHandler) ConnectSSHAgent() (int32, error) {
 	return (*CommandServer)(h).handler.ConnectSSHAgent()
+}
+
+// CancelServiceStart latches cancellation for this server's lifetime. Keep
+// platform resources alive until cold probes and rule downloads have unwound.
+func (s *CommandServer) CancelServiceStart() {
+	if s.cancel != nil {
+		s.cancel()
+	}
 }

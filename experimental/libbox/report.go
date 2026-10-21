@@ -59,6 +59,9 @@ func writeReportMetadata(destPath string, metadata any) {
 }
 
 func copyConfigSnapshot(destPath string) {
+	if runtime.GOOS == "android" {
+		return
+	}
 	snapshotPath := configSnapshotPath()
 	content, err := os.ReadFile(snapshotPath)
 	if err != nil {

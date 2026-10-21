@@ -58,8 +58,11 @@ func configSnapshotPath() string {
 }
 
 func saveConfigSnapshot(configContent string) {
+	if runtime.GOOS == "android" {
+		return
+	}
 	snapshotPath := configSnapshotPath()
-	os.WriteFile(snapshotPath, []byte(configContent), 0o666)
+	os.WriteFile(snapshotPath, []byte(configContent), 0o600)
 	chownReport(snapshotPath)
 }
 
