@@ -153,3 +153,17 @@ func SessionError(id int64) string {
 	}
 	return p.TerminalError()
 }
+
+// NotifyNetworkChanged must follow selection of the new physical Network.
+// Keep registration locked through delivery so a late event cannot affect a
+// replacement session's installation-scoped socket hooks.
+func NotifyNetworkChanged(id, expectedGeneration int64) bool {
+	sessionsMu.Lock()
+	defer sessionsMu.Unlock()
+	p := sessions[id]
+	if p == nil || expectedGeneration != generation || p.Stopped() {
+		return false
+	}
+	p.NetworkChanged()
+	return true
+}

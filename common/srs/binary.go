@@ -50,7 +50,30 @@ const (
 	ruleItemFinal uint8 = 0xFF
 )
 
-func Read(reader io.Reader, recover bool) (ruleSetCompat option.PlainRuleSetCompat, err error) {
+func Read(reader io.Reader, recover bool) (option.PlainRuleSetCompat, error) {
+	return read(reader, recover, 0)
+}
+
+// ReadValidated checks that the complete rule stream and its zlib checksum are present.
+// A subscription may carry highly compressed data; bound its expanded representation.
+func ReadValidated(reader io.Reader, maxExpanded int64) (option.PlainRuleSetCompat, error) {
+	if maxExpanded <= 0 {
+		return option.PlainRuleSetCompat{}, E.New("invalid rule-set size limit")
+	}
+	// zlib must share this ByteReader so it cannot consume bytes after its
+	// checksum while buffering the compressed stream.
+	buffered := bufio.NewReader(reader)
+	ruleSet, err := read(buffered, false, maxExpanded)
+	if err != nil {
+		return ruleSet, err
+	}
+	if _, err := buffered.ReadByte(); err != io.EOF {
+		return ruleSet, E.New("trailing rule-set data")
+	}
+	return ruleSet, nil
+}
+
+func read(reader io.Reader, recover bool, maxExpanded int64) (ruleSetCompat option.PlainRuleSetCompat, err error) {
 	var magicBytes [3]byte
 	_, err = io.ReadFull(reader, magicBytes[:])
 	if err != nil {
@@ -72,7 +95,14 @@ func Read(reader io.Reader, recover bool) (ruleSetCompat option.PlainRuleSetComp
 	if err != nil {
 		return
 	}
-	bReader := bufio.NewReader(compressReader)
+	defer compressReader.Close()
+	var expanded io.Reader = compressReader
+	var limit *io.LimitedReader
+	if maxExpanded != 0 {
+		limit = &io.LimitedReader{R: compressReader, N: maxExpanded + 1}
+		expanded = limit
+	}
+	bReader := bufio.NewReader(expanded)
 	length, err := binary.ReadUvarint(bReader)
 	if err != nil {
 		return
@@ -86,6 +116,12 @@ func Read(reader io.Reader, recover bool) (ruleSetCompat option.PlainRuleSetComp
 			return
 		}
 		ruleSetCompat.Options.Rules = append(ruleSetCompat.Options.Rules, rule)
+	}
+	if limit != nil {
+		if _, err = bReader.ReadByte(); err != io.EOF || limit.N == 0 {
+			return ruleSetCompat, E.New("invalid or oversized rule-set payload")
+		}
+		err = nil
 	}
 	return
 }

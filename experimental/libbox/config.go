@@ -11,12 +11,14 @@ import (
 
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/srs"
 	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/dns"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/route/rule"
 	"github.com/sagernet/sing-box/schema"
 	tun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/control"
@@ -48,6 +50,20 @@ func parseConfig(ctx context.Context, configContent string) (option.Options, err
 		return option.Options{}, E.Cause(err, "decode config")
 	}
 	return options, nil
+}
+
+// BinaryRuleSetContainsIPCIDR reports whether a compiled SRS matches destination addresses.
+func BinaryRuleSetContainsIPCIDR(path string) (bool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+	set, err := srs.ReadValidated(file, 64<<20)
+	if err != nil {
+		return false, err
+	}
+	return rule.ContainsDestinationIPCIDR(set.Options.Rules), nil
 }
 
 func CheckConfig(configContent string) error {

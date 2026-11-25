@@ -134,6 +134,10 @@ func StartVKTurnPrototype(input string) (*VKTurnPrototypeSession, error) {
 
 func StopVKTurnPrototype(id int64) { vkturn.StopSession(id) }
 
+func NotifyVKTurnNetworkChanged(id, generation int64) bool {
+	return vkturn.NotifyNetworkChanged(id, generation)
+}
+
 func CancelVKTurnPrototype() {
 	prototypeLogs.Lock()
 	prototypeLogs.active = false

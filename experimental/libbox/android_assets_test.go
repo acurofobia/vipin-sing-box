@@ -25,44 +25,58 @@ func TestAndroidBundledRoutingStartsWithAllRuleSets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var route map[string]json.RawMessage
-	if err := json.Unmarshal(data, &route); err != nil {
+	var document struct {
+		Assets   map[string]struct{ File string }
+		Profiles map[string]struct {
+			Rules []json.RawMessage
+			Final string
+		}
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
 		t.Fatal(err)
 	}
-	var sets []map[string]any
-	if err := json.Unmarshal(route["rule_set"], &sets); err != nil {
-		t.Fatal(err)
+	if len(document.Assets) != 22 || len(document.Profiles) != 2 {
+		t.Fatal("bundled routing must include both profiles and all 22 SRS files")
 	}
-	if len(sets) != 21 {
-		t.Fatalf("packaged rule-set count=%d, expected21", len(sets))
+	for name, profile := range document.Profiles {
+		t.Run(name, func(t *testing.T) {
+			tags := map[string]bool{}
+			for _, raw := range profile.Rules {
+				var rule struct {
+					RuleSet any `json:"rule_set"`
+				}
+				if err := json.Unmarshal(raw, &rule); err != nil {
+					t.Fatal(err)
+				}
+				switch values := rule.RuleSet.(type) {
+				case string:
+					tags[values] = true
+				case []any:
+					for _, value := range values {
+						tags[value.(string)] = true
+					}
+				}
+			}
+			var sets []map[string]string
+			for tag := range tags {
+				path := filepath.Join(assets, "rulesets", document.Assets[tag].File)
+				hasIP, err := BinaryRuleSetContainsIPCIDR(path)
+				if err != nil || hasIP != (tag == "geoip-direct") {
+					t.Fatalf("bundled %s: IP matches=%v, err=%v", tag, hasIP, err)
+				}
+				sets = append(sets, map[string]string{"type": "local", "format": "binary", "tag": tag, "path": path})
+			}
+			route, err := json.Marshal(map[string]any{"rules": profile.Rules, "final": profile.Final, "rule_set": sets})
+			if err != nil {
+				t.Fatal(err)
+			}
+			startBundledRouter(t, route)
+		})
 	}
-	// The runtime keeps remote descriptors and supplies a packaged initial_path.
-	// Include the separate Russia-inside fallback so all 22 assets are decoded.
-	sets = append(sets, map[string]any{
-		"type": "remote", "tag": "russia-inside", "format": "binary",
-		"url":         "https://github.com/itdoginfo/allow-domains/releases/latest/download/russia_inside.srs",
-		"http_client": map[string]any{"detour": "vk-wg"}, "update_interval": "1d",
-	})
-	for _, set := range sets {
-		if set["type"] != "remote" || set["url"] == "" {
-			t.Fatal("bundled routing lost remote update descriptor")
-		}
-		client, ok := set["http_client"].(map[string]any)
-		if !ok || client["detour"] != "vk-wg" {
-			t.Fatal("remote rule updates bypass selected proxy")
-		}
-		tag, ok := set["tag"].(string)
-		if !ok {
-			t.Fatal("rule set has no tag")
-		}
-		absolute := filepath.Join(assets, "rulesets", tag+".srs")
-		if _, err := os.Stat(absolute); err != nil {
-			t.Fatal(err)
-		}
-		set["initial_path"] = absolute
-	}
-	route["rule_set"], _ = json.Marshal(sets)
-	data, _ = json.Marshal(route)
+}
+
+func startBundledRouter(t *testing.T, data []byte) {
+	t.Helper()
 	text, err := vkturn.BuildVLESSConfiguration(data, json.RawMessage(`{"type":"vless","server":"127.0.0.1","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +85,7 @@ func TestAndroidBundledRoutingStartsWithAllRuleSets(t *testing.T) {
 	if err := json.Unmarshal([]byte(text), &config); err != nil {
 		t.Fatal(err)
 	}
-	config["inbounds"] = json.RawMessage(`[{"type":"mixed","tag":"asset-test","listen":"127.0.0.1","listen_port":0}]`)
+	delete(config, "inbounds")
 	config["log"] = json.RawMessage(`{"disabled":true}`)
 	data, _ = json.Marshal(config)
 	directory := t.TempDir()

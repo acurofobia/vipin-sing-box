@@ -72,6 +72,10 @@ func isIPCIDRHeadlessRule(rule option.DefaultHeadlessRule) bool {
 	return len(rule.IPCIDR) > 0 || rule.IPSet != nil
 }
 
+func ContainsDestinationIPCIDR(rules []option.HeadlessRule) bool {
+	return HasHeadlessRule(rules, isIPCIDRHeadlessRule)
+}
+
 func isDNSQueryTypeHeadlessRule(rule option.DefaultHeadlessRule) bool {
 	return len(rule.QueryType) > 0
 }
@@ -89,7 +93,7 @@ func buildRuleSetMetadata(headlessRules []option.HeadlessRule) adapter.RuleSetMe
 	return adapter.RuleSetMetadata{
 		ContainsProcessRule:      HasHeadlessRule(headlessRules, isProcessHeadlessRule),
 		ContainsWIFIRule:         HasHeadlessRule(headlessRules, isWIFIHeadlessRule),
-		ContainsIPCIDRRule:       HasHeadlessRule(headlessRules, isIPCIDRHeadlessRule),
+		ContainsIPCIDRRule:       ContainsDestinationIPCIDR(headlessRules),
 		ContainsDNSQueryTypeRule: HasHeadlessRule(headlessRules, isDNSQueryTypeHeadlessRule),
 		ContainsNonIPCIDRRule:    HasHeadlessRule(headlessRules, isNonIPCIDRHeadlessRule),
 	}
